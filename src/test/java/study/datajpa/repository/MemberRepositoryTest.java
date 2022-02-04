@@ -6,6 +6,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Slice;
 import org.springframework.data.domain.Sort;
 import org.springframework.test.annotation.Rollback;
 import org.springframework.transaction.annotation.Transactional;
@@ -13,6 +14,8 @@ import study.datajpa.dto.MemberDto;
 import study.datajpa.entity.Member;
 import study.datajpa.entity.Team;
 
+import javax.persistence.EntityManager;
+import javax.persistence.PersistenceContext;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
@@ -28,6 +31,8 @@ public class MemberRepositoryTest {
     MemberRepository memberRepository;
     @Autowired
     TeamRepository teamRepository;
+    @PersistenceContext
+    EntityManager em;
 
     @Test
     public void testMember() {
@@ -160,7 +165,7 @@ public class MemberRepositoryTest {
         int age = 10;
         PageRequest pageRequest = PageRequest.of(0, 3, Sort.by(Sort.Direction.DESC, "username"));
 
-        Page<Member> page = memberRepository.findByAge(age, pageRequest);
+        Page<Member> page = memberRepository.findPageByAge(age, pageRequest);
 
         Page<MemberDto> toMap = page.map(m -> new MemberDto(m.getId(), m.getUsername(), null));
 
@@ -174,16 +179,85 @@ public class MemberRepositoryTest {
         assertThat(page.isFirst()).isTrue();
         assertThat(page.hasNext()).isTrue();
 
-        //Slice<Member> page2 = memberRepository.findByAge(age, pageRequest);
+        Slice<Member> page2 = memberRepository.findSliceByAge(age, pageRequest);
 
-        //List<Member> content2 = page2.getContent();
+        List<Member> content2 = page2.getContent();
 
-        //assertThat(content2.size()).isEqualTo(3);
-        //assertThat(page2.getNumber()).isEqualTo(0);
-        //assertThat(page2.isFirst()).isTrue();
-        //assertThat(page2.hasNext()).isTrue();
+        assertThat(content2.size()).isEqualTo(3);
+        assertThat(page2.getNumber()).isEqualTo(0);
+        assertThat(page2.isFirst()).isTrue();
+        assertThat(page2.hasNext()).isTrue();
 
     }
 
+    @Test
+    public void bulkUpdate() {
+        memberRepository.save(new Member("member1", 10));
+        memberRepository.save(new Member("member2", 19));
+        memberRepository.save(new Member("member3", 20));
+        memberRepository.save(new Member("member4", 21));
+        memberRepository.save(new Member("member5", 40));
+
+        int resultCount = memberRepository.bulkAgePlus(20);
+
+        // @Modifying(clearAutomatically = true) 처리를 통해 아래 주석 처리 가능
+        // em.flush();
+        // em.clear();
+
+        Member memeber5 = memberRepository.findMemberByUsername("member5");
+
+        System.out.println("member5 = " + memeber5);
+
+        assertThat(resultCount).isEqualTo(3);
+    }
+
+    @Test
+    public void findMemberLazy() {
+
+        // given
+        // member1 -> teamA
+        // member2 -> teamB
+
+        Team TeamA = new Team("teamA");
+        Team TeamB = new Team("teamB");
+
+        teamRepository.save(TeamA);
+        teamRepository.save(TeamB);
+
+        Member member1 = new Member("member1", 10, TeamA);
+        Member member3 = new Member("member2", 10, TeamB);
+        Member member4 = new Member("member1", 10, TeamA);
+
+        memberRepository.save(member1);
+        memberRepository.save(member3);
+        memberRepository.save(member4);
+
+        em.flush();
+        em.clear();
+
+        // when N + 1
+        // select Member 1
+        List<Member> members = memberRepository.findAll(); // override
+        List<Member> members2 = memberRepository.findMemberFetchJoin();
+        List<Member> members3 = memberRepository.findEntityGraphByUsername("member1");
+
+        for (Member member : members) {
+            System.out.println("member.name = " + member.getUsername());
+            System.out.println("member.teamClass = " + member.getTeam().getClass()); // 가짜 Team 객체 반환
+            System.out.println("member.teamName = " + member.getTeam().getName() ); // 실제 Team 객체 반환
+        }
+
+        for (Member member : members2) {
+            System.out.println("member2.name = " + member.getUsername());
+            System.out.println("member2.teamClass = " + member.getTeam().getClass());
+            System.out.println("member2.teamName = " + member.getTeam().getName() );
+        }
+
+        for (Member member : members3) {
+            System.out.println("member3.name = " + member.getUsername());
+            System.out.println("member3.teamClass = " + member.getTeam().getClass());
+            System.out.println("member3.teamName = " + member.getTeam().getName() );
+        }
+    }
 
 }
